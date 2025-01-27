@@ -15,11 +15,11 @@ struct pair_hash {
 };
 
 namespace TCB{
-    int read_node(
+    int read_nodes(
         std::ifstream& infile,
         std::vector<Eigen::Vector3d>& nodes,
         std::vector<int>& boundary_markers
-    ){
+        ){
         if (!infile.good()){
             WARNING("Error reading file!");
             return 0;
@@ -64,19 +64,63 @@ namespace TCB{
 
           return 1;
     }
-    int read_node(
-    std::ifstream& infile,
-    std::vector<Eigen::Vector3d>& nodes
-    ) {
+    int read_nodes(
+        std::ifstream& infile,
+        std::vector<Eigen::Vector3d>& nodes
+        ) {
         std::vector<int> boundary_markers;
-        return read_node(infile, nodes, boundary_markers);
+        return read_nodes(infile, nodes, boundary_markers);
+    }
+
+    int read_tets(
+            std::ifstream& infile,
+            std::vector<std::vector<int>>& tets
+            ) {
+        if (!infile.good()) {
+            WARNING("Error reading file!");
+            return 0;
+        }
+
+        bool first_info = true;
+        int tets_nb, vertices_nb_per_tet, attribute;
+
+        std::string sline, s;
+        while (std::getline(infile, sline)){
+            std::istringstream ins(sline);
+            ins >> s;
+
+            if (s == "#") continue; // remarks
+
+            if (first_info){
+                tets_nb = std::atoi(s.c_str());
+                ins >> vertices_nb_per_tet >> attribute;
+
+                VERBOSE("tets_nb = " << tets_nb << ", vertices_nb_per_tet = " << vertices_nb_per_tet << ", attribute = " << attribute);
+
+                std::vector<std::vector<int>>(tets_nb).swap(tets);
+                first_info = false;
+            }
+            else{
+                int vi = std::atoi(s.c_str()) - 1;
+
+                std::vector<int> tet;
+                for (int i = 0; i < vertices_nb_per_tet; ++i) {
+                    int vi;
+                    ins >> vi;
+                    tet.push_back(vi - 1);
+                }
+                tets[vi] = tet;
+            }
+        }
+
+        return 1;
     }
 
     int write_mesh(
-    std::ofstream& outfile,
-    std::vector<Eigen::Vector3d>& vertices, std::vector<std::vector<int>>& faces,
-    const std::string& file_format
-    ) {
+        std::ofstream& outfile,
+        std::vector<Eigen::Vector3d>& vertices, std::vector<std::vector<int>>& faces,
+        const std::string& file_format
+        ) {
         if (!outfile.good()) {
             WARNING("Error writing file!");
             return 0;
@@ -129,7 +173,7 @@ namespace TCB{
         std::ofstream& outfile,
         std::vector<Eigen::Vector3d>& vertices, std::vector<Eigen::Vector3i>& faces,
         const std::string& file_format
-    ) {
+        ) {
         // convert Eigen::Vector3i to std::vector<int>
         std::vector<std::vector<int>> i_faces;
         i_faces.reserve(faces.size());
@@ -144,9 +188,50 @@ namespace TCB{
         std::ofstream& outfile,
         std::vector<Eigen::Vector3d>& vertices,
         const std::string& file_format
-    ) {
+        ) {
         std::vector<std::vector<int>> faces;
 
         return write_mesh(outfile, vertices, faces, file_format);
+    }
+
+    int write_tets(
+        std::ofstream& outfile,
+        std::vector<Eigen::Vector3d>& nodes, std::vector<std::vector<int>>& tets,
+        const double& scaling,
+        const std::string& file_format
+        ) {
+        std::vector<Eigen::Vector3d> o_nodes;
+        std::vector<std::vector<int>> o_faces;
+        for (auto & tet : tets) {
+            int p_cnt = o_nodes.size();
+
+            // scaling
+            Eigen::Vector3d mid_p(0, 0, 0);
+            for (int & p : tet) mid_p += nodes[p];
+            mid_p /= tet.size();
+
+            for (int & p : tet) {
+                o_nodes.emplace_back(scaling * nodes[p] + (1 - scaling) * mid_p);
+            }
+
+            if (tet.size() == 4) {
+                o_faces.push_back(std::vector<int>({p_cnt, p_cnt + 2, p_cnt + 1}));
+                o_faces.push_back(std::vector<int>({p_cnt, p_cnt + 1, p_cnt + 3}));
+                o_faces.push_back(std::vector<int>({p_cnt, p_cnt + 3, p_cnt + 2}));
+                o_faces.push_back(std::vector<int>({p_cnt + 1, p_cnt + 2, p_cnt + 3}));
+            }
+            else if (tet.size() == 10) {
+                o_faces.push_back(std::vector<int>({p_cnt, p_cnt + 6, p_cnt + 1, p_cnt + 8, p_cnt + 3, p_cnt + 5}));
+                o_faces.push_back(std::vector<int>({p_cnt, p_cnt + 9, p_cnt + 2, p_cnt + 7, p_cnt + 1, p_cnt + 6}));
+                o_faces.push_back(std::vector<int>({p_cnt, p_cnt + 5, p_cnt + 3, p_cnt + 4, p_cnt + 2, p_cnt + 9}));
+                o_faces.push_back(std::vector<int>({p_cnt + 1, p_cnt + 8, p_cnt + 3, p_cnt + 4, p_cnt + 2, p_cnt + 7}));
+            }
+            else {
+                WARNING("The tets must have 4 or 10 nodes!");
+                return 0;
+            }
+        }
+
+        return write_mesh(outfile, o_nodes, o_faces, file_format);
     }
 }
